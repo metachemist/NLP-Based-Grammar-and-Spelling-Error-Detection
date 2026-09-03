@@ -1,11 +1,16 @@
 # --- Core (required) ---
-spacy>=3.7,<4.0
+spacy>=3.8,<3.9
 pyspellchecker>=0.8
 streamlit>=1.30
 
-# After installing, download the small English model:
-#   python -m spacy download en_core_web_sm
+# spaCy English model (not on PyPI, so pin the wheel directly).
+# `spacy.load("en_core_web_sm")` finds it whether it is installed this way
+# or via `python -m spacy download en_core_web_sm`.
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
 # --- Neural layer (optional; ~1GB download on first run) ---
-# Install these only if you want Layer 4 (Transformer grammar correction):
+# Install these only if you want Layer 4 (Transformer grammar correction).
+# Left out of deployments by default: torch + the T5 model need more RAM
+# than most free tiers give you, and the app disables Layer 4 cleanly when
+# these are absent.
 #   pip install "transformers>=4.40" "torch>=2.2" sentencepiece
