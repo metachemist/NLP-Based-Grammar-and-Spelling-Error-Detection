@@ -204,6 +204,44 @@ def _rule_subject_verb_agreement(doc) -> list[Issue]:
     return out
 
 
+_NON_BASE_AFTER_DO = {"VBD", "VBN", "VBZ", "VBG"}
+
+
+def _rule_do_support_base_form(doc) -> list[Issue]:
+    """After "do/does/did" (incl. "don't/doesn't/didn't"), the main verb
+    must be the bare infinitive: "I didn't *know*", not "I didn't *knew*".
+
+    We look for a verb whose dependency children include an ``aux`` with
+    lemma "do"; if that verb is tagged as anything other than a base form
+    (VBD/VBN/VBZ/VBG), we flag it and suggest the lemma.
+    """
+    out = []
+    for token in doc:
+        if token.pos_ not in ("VERB", "AUX"):
+            continue
+        if token.tag_ not in _NON_BASE_AFTER_DO:
+            continue
+        do_aux = next(
+            (c for c in token.children
+             if c.dep_ == "aux" and c.lemma_ == "do"),
+            None,
+        )
+        if do_aux is None:
+            continue
+        base = token.lemma_
+        if not base or base == token.lower_:
+            continue
+        fix = base.capitalize() if token.text[:1].isupper() else base
+        out.append(Issue(
+            start=token.idx, end=token.idx + len(token.text), text=token.text,
+            category="grammar", rule_id="DO_SUPPORT_BASE_FORM",
+            message=(f'After "{do_aux.text}" use the base form "{fix}", '
+                     f'not "{token.text}".'),
+            suggestions=[fix], source="rules",
+        ))
+    return out
+
+
 def _rule_repeated_word(doc) -> list[Issue]:
     out = []
     for i in range(len(doc) - 1):
@@ -256,6 +294,7 @@ _RULES = (
     _rule_standalone_i,
     _rule_a_vs_an,
     _rule_subject_verb_agreement,
+    _rule_do_support_base_form,
     _rule_repeated_word,
     _rule_space_before_punctuation,
     _rule_missing_sentence_punctuation,

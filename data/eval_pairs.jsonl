@@ -30,3 +30,7 @@
 {"bad": "An honest mistake is easy to forgive.", "good": "An honest mistake is easy to forgive.", "phenomenon": "clean"}
 {"bad": "The university offers a unique programme this year.", "good": "The university offers a unique programme this year.", "phenomenon": "clean"}
 {"bad": "She said, \"I will call you tonight.\"", "good": "She said, \"I will call you tonight.\"", "phenomenon": "clean"}
+{"bad": "I didn't knew the answer.", "good": "I didn't know the answer.", "phenomenon": "do_support"}
+{"bad": "She doesn't likes her new job.", "good": "She doesn't like her new job.", "phenomenon": "do_support"}
+{"bad": "They did not went to the party.", "good": "They did not go to the party.", "phenomenon": "do_support"}
+{"bad": "We didn't think it would rain.", "good": "We didn't think it would rain.", "phenomenon": "clean"}

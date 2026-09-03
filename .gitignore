@@ -104,3 +104,6 @@ scratch/
 # ---------------------------------------------------------------------------
 report/results_*.txt
 report/*.pdf
+
+# Locally downloaded models (Layer 4)
+models/

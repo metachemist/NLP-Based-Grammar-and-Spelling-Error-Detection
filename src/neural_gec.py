@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import difflib
 import functools
+import os
 import re
 
 from .issue import Issue
 
-_MODEL = "vennify/t5-base-grammar-correction"
+# Hugging Face repo id by default; point NEURAL_GEC_MODEL at a local directory
+# (containing config.json, the weights, and the tokenizer files) to run offline.
+_MODEL = os.environ.get("NEURAL_GEC_MODEL", "vennify/t5-base-grammar-correction")
 
 
 def is_available() -> bool:
@@ -33,15 +36,34 @@ def is_available() -> bool:
 
 
 @functools.lru_cache(maxsize=1)
-def _get_pipe():
-    from transformers import pipeline
+def _get_model():
+    """Load tokenizer + seq2seq model once.
 
-    return pipeline("text2text-generation", model=_MODEL, max_length=256)
+    We drive the model directly rather than via ``transformers.pipeline``:
+    the ``text2text-generation`` pipeline task was removed in transformers 5,
+    and ``AutoModelForSeq2SeqLM.generate`` is stable across 4.x and 5.x.
+    """
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(_MODEL)
+    model = AutoModelForSeq2SeqLM.from_pretrained(_MODEL)
+    model.eval()
+    return tokenizer, model
 
 
 def _correct_sentence(sentence: str) -> str:
-    out = _get_pipe()("grammar: " + sentence, num_beams=4, do_sample=False)
-    return out[0]["generated_text"].strip()
+    import torch
+
+    tokenizer, model = _get_model()
+    inputs = tokenizer(
+        "grammar: " + sentence, return_tensors="pt",
+        truncation=True, max_length=256,
+    )
+    with torch.no_grad():
+        out = model.generate(
+            **inputs, num_beams=4, do_sample=False, max_length=256,
+        )
+    return tokenizer.decode(out[0], skip_special_tokens=True).strip()
 
 
 def _diff_to_issues(original: str, corrected: str, offset: int) -> list[Issue]:
