@@ -1,0 +1,11 @@
+# --- Core (required) ---
+spacy>=3.7,<4.0
+pyspellchecker>=0.8
+streamlit>=1.30
+
+# After installing, download the small English model:
+#   python -m spacy download en_core_web_sm
+
+# --- Neural layer (optional; ~1GB download on first run) ---
+# Install these only if you want Layer 4 (Transformer grammar correction):
+#   pip install "transformers>=4.40" "torch>=2.2" sentencepiece

@@ -1,0 +1,32 @@
+{"bad": "She recieved the parcel yesterday.", "good": "She received the parcel yesterday.", "phenomenon": "non_word_spelling"}
+{"bad": "I definitly need more coffee.", "good": "I definitely need more coffee.", "phenomenon": "non_word_spelling"}
+{"bad": "The govenment announced a new policy.", "good": "The government announced a new policy.", "phenomenon": "non_word_spelling"}
+{"bad": "He teached us how to swim.", "good": "He taught us how to swim.", "phenomenon": "non_word_spelling"}
+{"bad": "Their are many reasons to visit.", "good": "There are many reasons to visit.", "phenomenon": "real_word_confusion"}
+{"bad": "The dog chase the ball across the yard.", "good": "The dog chases the ball across the yard.", "phenomenon": "subject_verb"}
+{"bad": "My friends is coming over tonight.", "good": "My friends are coming over tonight.", "phenomenon": "subject_verb"}
+{"bad": "She go to work by train.", "good": "She goes to work by train.", "phenomenon": "subject_verb"}
+{"bad": "The children was playing outside.", "good": "The children were playing outside.", "phenomenon": "subject_verb"}
+{"bad": "It cost about ten dollars.", "good": "It costs about ten dollars.", "phenomenon": "subject_verb"}
+{"bad": "I saw a elephant at the zoo.", "good": "I saw an elephant at the zoo.", "phenomenon": "a_vs_an"}
+{"bad": "That was an brilliant idea.", "good": "That was a brilliant idea.", "phenomenon": "a_vs_an"}
+{"bad": "We waited for a hour in the rain.", "good": "We waited for an hour in the rain.", "phenomenon": "a_vs_an"}
+{"bad": "This is a a common typing mistake.", "good": "This is a common typing mistake.", "phenomenon": "repeated_word"}
+{"bad": "The the report is due on Friday.", "good": "The report is due on Friday.", "phenomenon": "repeated_word"}
+{"bad": "i went to the library after class.", "good": "I went to the library after class.", "phenomenon": "lowercase_i"}
+{"bad": "she asked whether i was ready.", "good": "She asked whether I was ready.", "phenomenon": "lowercase_i"}
+{"bad": "the meeting starts at nine tomorrow.", "good": "The meeting starts at nine tomorrow.", "phenomenon": "sentence_capitalization"}
+{"bad": "we should leave before it gets dark.", "good": "We should leave before it gets dark.", "phenomenon": "sentence_capitalization"}
+{"bad": "Please close the door , it is cold.", "good": "Please close the door, it is cold.", "phenomenon": "space_before_punct"}
+{"bad": "He finished the exam early .", "good": "He finished the exam early.", "phenomenon": "space_before_punct"}
+{"bad": "They arrived late because the flight was delayed", "good": "They arrived late because the flight was delayed.", "phenomenon": "missing_sentence_punct"}
+{"bad": "I have visit Paris three times.", "good": "I have visited Paris three times.", "phenomenon": "verb_tense"}
+{"bad": "Yesterday we go to the museum.", "good": "Yesterday we went to the museum.", "phenomenon": "verb_tense"}
+{"bad": "She is interested on learning Spanish.", "good": "She is interested in learning Spanish.", "phenomenon": "preposition"}
+{"bad": "He is good in mathematics.", "good": "He is good at mathematics.", "phenomenon": "preposition"}
+{"bad": "I want to discuss about the results.", "good": "I want to discuss the results.", "phenomenon": "extra_word"}
+{"bad": "The results were published last month.", "good": "The results were published last month.", "phenomenon": "clean"}
+{"bad": "Our team meets every Monday to review progress.", "good": "Our team meets every Monday to review progress.", "phenomenon": "clean"}
+{"bad": "An honest mistake is easy to forgive.", "good": "An honest mistake is easy to forgive.", "phenomenon": "clean"}
+{"bad": "The university offers a unique programme this year.", "good": "The university offers a unique programme this year.", "phenomenon": "clean"}
+{"bad": "She said, \"I will call you tonight.\"", "good": "She said, \"I will call you tonight.\"", "phenomenon": "clean"}
