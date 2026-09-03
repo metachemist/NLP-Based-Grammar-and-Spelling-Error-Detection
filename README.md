@@ -23,8 +23,19 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 
-# Optional: enable Layer 4 (the Transformer)
-pip install "transformers>=4.40" "torch>=2.2" sentencepiece
+# Optional: enable Layer 4 (the Transformer). CPU-only torch keeps the
+# download small; drop the --index-url for the default (CUDA) build.
+pip install "transformers>=4.40" sentencepiece
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+The T5 model (`vennify/t5-base-grammar-correction`, ~850 MB) downloads from the
+Hugging Face Hub on first use. To run Layer 4 offline, pre-download it and point
+`NEURAL_GEC_MODEL` at a local directory:
+
+```bash
+hf download vennify/t5-base-grammar-correction --local-dir models/t5-base-grammar-correction
+export NEURAL_GEC_MODEL=models/t5-base-grammar-correction   # HF id or local path
 ```
 
 ## Run
@@ -53,7 +64,7 @@ src/
   pipeline.py      runs the layers, deduplicates overlapping findings
   evaluate.py      Layer 5  (metrics)
 data/
-  eval_pairs.jsonl  ~30 (bad, good, phenomenon) minimal pairs
+  eval_pairs.jsonl  36 (bad, good, phenomenon) rows: 30 errors + 6 clean
 app.py             Streamlit UI
 report/report.md   written report
 ```

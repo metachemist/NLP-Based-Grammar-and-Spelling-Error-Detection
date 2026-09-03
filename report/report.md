@@ -14,9 +14,9 @@ pipeline**: (1) tokenization, (2) a noisy-channel spelling corrector based on
 edit distance, (3) a set of rules operating on part-of-speech tags and a
 dependency parse, and (4) an optional Transformer-based grammatical error
 correction (GEC) model. The layers are combined and deduplicated, and results
-are shown in an interactive web application. On a 32-item minimal-pair test set
-the system detects _XX%_ of introduced errors with a _YY%_ false-positive rate
-on clean sentences.
+are shown in an interactive web application. On a 36-item minimal-pair test set
+the full pipeline detects **97%** of introduced errors (**77%** with the
+offline rule layers alone) at a **0%** false-positive rate on clean sentences.
 
 ## 1. Introduction
 
@@ -70,8 +70,8 @@ check needs.
 ### 2.5 Grammatical Error Correction (GEC) as sequence-to-sequence
 Modern GEC treats correction as translation from *ungrammatical* to
 *grammatical* English. A Transformer encoder–decoder (here **T5-base**,
-fine-tuned on the JFLEG / C4-200M-style corpora) is trained on millions of
-(source, target) pairs. It generalises to error types never explicitly
+fine-tuned for grammar correction on the JFLEG corpus) is trained on
+(source, target) sentence pairs. It generalises to error types never explicitly
 programmed, at the cost of interpretability and speed.
 
 ### 2.6 Evaluation metrics
@@ -90,7 +90,7 @@ raw text
 spaCy: tokenize + sentence-split + POS + dependency parse      (Layer 1)
    │
    ├── spell_checker.check_spelling   dictionary + edit distance   (Layer 2)
-   ├── grammar_rules.check_grammar    7 rules over tags + parse     (Layer 3)
+   ├── grammar_rules.check_grammar    8 rules over tags + parse     (Layer 3)
    └── neural_gec.neural_issues       T5 rewrite → word-level diff  (Layer 4, optional)
    │
 pipeline._dedupe   drop overlapping findings, keep the most specific
@@ -117,15 +117,21 @@ corpus frequency, keep the top 5, preserve original casing.
 | `LOWERCASE_I` | standalone pronoun "i" | token text |
 | `A_VS_AN` | "a"/"an" vs. following word's initial sound | next token + exception lists |
 | `SUBJECT_VERB_AGREEMENT` | singular/plural subject vs. `VBZ`/`VBP` verb | `nsubj` dependency, `tag_` |
+| `DO_SUPPORT_BASE_FORM` | verb after "do/does/did" must be the bare infinitive ("didn't *know*", not "didn't *knew*") | `aux` dependency with lemma "do", `tag_`, `lemma_` |
 | `REPEATED_WORD` | same word twice in a row | adjacent tokens |
 | `SPACE_BEFORE_PUNCT` | whitespace before `, . ! ? ; :` | regex on raw text |
 | `MISSING_SENTENCE_PUNCT` | clause with a finite verb, no terminal punctuation | `doc.sents`, `tag_` |
 
 ### 3.5 Layer 4 — neural GEC
 Each sentence is prefixed with `"grammar: "` and passed to
-`vennify/t5-base-grammar-correction`. The output is aligned to the input with a
+`vennify/t5-base-grammar-correction` (a T5-base fine-tune, ~850 MB). We call the
+model directly through `AutoModelForSeq2SeqLM.generate` (4-beam search, greedy)
+rather than the `transformers` `pipeline`, whose `text2text-generation` task was
+removed in `transformers` 5. The rewrite is aligned to the input with a
 word-level `difflib` diff; every `replace` / `delete` / `insert` opcode becomes
-an `Issue` with `rule_id = NEURAL_GEC`, mapped back to character offsets.
+an `Issue` with `rule_id = NEURAL_GEC`, mapped back to character offsets. The
+model path is set by `NEURAL_GEC_MODEL` (a Hugging Face id or a local directory),
+so the layer can run fully offline.
 
 ### 3.6 Merging
 Findings are sorted by (source priority, position). A finding is dropped if it
@@ -141,9 +147,9 @@ suggestions.
 
 ## 4. Implementation
 
-- **Language / libraries:** Python 3.12, spaCy 3.x (`en_core_web_sm`),
-  `pyspellchecker`, Streamlit; optionally `transformers` + `torch`.
-- **Lines of code:** ~_XXX_ across `src/`.
+- **Language / libraries:** Python 3.12, spaCy 3.8 (`en_core_web_sm`),
+  `pyspellchecker`, Streamlit; optionally `transformers` 5 + `torch` 2 (CPU).
+- **Lines of code:** ~600 across `src/` (≈780 with blank lines and comments).
 - **Design choices worth noting:**
   - one shared `Issue` type;
   - Layer 4 import-safe so the project runs on machines without PyTorch;
@@ -153,8 +159,8 @@ suggestions.
 ## 5. Evaluation
 
 ### 5.1 Test set
-`data/eval_pairs.jsonl` — 32 minimal pairs: 27 `(bad, good)` sentences across 9
-error phenomena, plus 5 clean sentences to measure false positives.
+`data/eval_pairs.jsonl` — 36 minimal pairs: 30 `(bad, good)` sentences across 13
+error phenomena, plus 6 clean sentences to measure false positives.
 
 ### 5.2 Metrics
 - **Detection recall** — a `bad` sentence produced ≥ 1 issue.
@@ -165,39 +171,63 @@ error phenomena, plus 5 clean sentences to measure false positives.
 
 | Configuration | Detection recall | Localization | FP rate (clean) |
 |---|---|---|---|
-| Layers 2–3 (offline) | **74%** (20/27) | 74% | **0%** (0/5) |
-| Layers 2–4 (+ T5) | _run `python -m src.evaluate --neural` and paste_ | _XX%_ | _XX%_ |
+| Layers 2–3 (offline rules) | **77%** (23/30) | 77% (23/30) | **0%** (0/6) |
+| Layers 2–4 (+ T5) | **97%** (29/30) | 97% (29/30) | **0%** (0/6) |
 
-Per-phenomenon (Layers 2–3):
+Per-phenomenon, both configurations (detect / localize):
 
-| phenomenon | n | detect | localize |
+| phenomenon | n | Layers 2–3 | Layers 2–4 (+ T5) |
 |---|--:|--:|--:|
-| a_vs_an | 3 | 100% | 100% |
-| lowercase_i | 2 | 100% | 100% |
-| missing_sentence_punct | 1 | 100% | 100% |
-| non_word_spelling | 4 | 100% | 100% |
-| repeated_word | 2 | 100% | 100% |
-| sentence_capitalization | 2 | 100% | 100% |
-| space_before_punct | 2 | 100% | 100% |
-| subject_verb | 5 | 80% | 80% |
-| extra_word | 1 | 0% | 0% |
-| preposition | 2 | 0% | 0% |
-| real_word_confusion | 1 | 0% | 0% |
-| verb_tense | 2 | 0% | 0% |
+| a_vs_an | 3 | 100% / 100% | 100% / 100% |
+| do_support | 3 | 100% / 100% | 100% / 100% |
+| lowercase_i | 2 | 100% / 100% | 100% / 100% |
+| missing_sentence_punct | 1 | 100% / 100% | 100% / 100% |
+| non_word_spelling | 4 | 100% / 100% | 100% / 100% |
+| repeated_word | 2 | 100% / 100% | 100% / 100% |
+| sentence_capitalization | 2 | 100% / 100% | 100% / 100% |
+| space_before_punct | 2 | 100% / 100% | 100% / 100% |
+| subject_verb | 5 | 80% / 80% | 100% / 100% |
+| extra_word | 1 | 0% / 0% | 100% / 100% |
+| preposition | 2 | 0% / 0% | 50% / 50% |
+| real_word_confusion | 1 | 0% / 0% | 100% / 100% |
+| verb_tense | 2 | 0% / 0% | 100% / 100% |
 
 The rule layer handles every phenomenon it was designed for at 100%, plus 4/5
-subject–verb cases (the miss is a spaCy parser error that tags the main verb
-"chase" as a noun). The four phenomena at 0% — extra/missing words, preposition
+subject–verb cases; the one miss ("The dog *chase* the ball…") is a spaCy parse
+error that tags the main verb "chase" as a noun, so the agreement rule never
+fires. The four phenomena at 0% for the rules — extra/missing words, preposition
 choice, real-word confusion, verb tense — are precisely the context-sensitive
-errors that rules cannot see and Layer 4 is meant to recover.
+errors that rules cannot see.
+
+Adding Layer 4 lifts overall detection **77% → 97%** and localization the same,
+recovering every rule blind spot except one of the two preposition cases
+("interested *on* learning" → "in" is caught; "good *in* mathematics" → "at" is
+not), and also fixing the parser-induced subject–verb miss. Critically, the generative
+model introduces **no** false positives on the six clean sentences — it does not
+rewrite text that is already correct. The cost is speed: the neural run takes
+~1m52s for 30 sentences on CPU (≈3.7 s/sentence) versus well under a second for
+the rule layers.
 
 ### 5.4 Discussion
-- Which phenomena do the rules catch reliably? (spelling, a/an, repeated words,
-  capitalization, subject–verb agreement with clear subjects.)
-- Which need the neural layer? (preposition choice, verb tense across a clause,
-  real-word confusions like *their/there*, missing/extra words.)
-- Where do false positives come from? (proper nouns not in the dictionary,
-  imperatives flagged as missing subjects, informal but valid style.)
+- **What the rules catch reliably.** Non-word spelling, a/an, standalone "i",
+  repeated words, capitalization, punctuation spacing, do-support, and
+  subject–verb agreement when the subject is an unambiguous pronoun or noun —
+  all at 100% on this set. These are local, closed-class patterns that a POS tag
+  plus one dependency edge fully determine.
+- **What needs the neural layer.** Preposition choice, verb tense across a
+  clause, real-word confusions (*their/there*), and missing/extra words: the
+  rules score 0% on all four, T5 recovers three of them entirely and one
+  preposition case out of two. These errors need lexical/semantic context that
+  is not expressible as a tag pattern.
+- **Where false positives would come from.** None occurred here, but the likely
+  sources are proper nouns absent from the dictionary, imperatives read as
+  subject-less clauses, and informal-but-valid style. The 0% clean-set result
+  should be read as "no regressions on 6 easy sentences", not as a precision
+  guarantee.
+- **Rules vs. neural trade-off.** The rules are instant and every flag is
+  explainable by a named `rule_id`; T5 roughly quadruples recall but costs
+  ~3.7 s/sentence on CPU, needs an 850 MB model, and its "reason" is only the
+  diff between two strings.
 
 ## 6. Limitations and Future Work
 
