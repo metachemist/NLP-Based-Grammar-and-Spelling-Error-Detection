@@ -1,263 +1,501 @@
 # NLP-Based Grammar and Spelling Error Detection
 
-**Author:** _<your name>_
-**Course / Assignment:** _<course code>_
-**Date:** _<date>_
+**University of Karachi — Department of Computer Science**
+
+**Course:** Natural Language Processing
+
+**Project Report**
+
+**Submitted by:**
+
+| Name | Seat No. |
+|---|---|
+| Shehryar Ahmed | Eb23210006123 |
+| Hamza Owais | Eb23210006028 |
+| Hafsa Shahid | Eb23210006026 |
+| Syed Muhammad Jawad | Eb23210006135 |
 
 ---
 
 ## Abstract
 
-_(Write last, ~150 words.)_ This project builds a system that automatically
-detects spelling and grammatical errors in English text. It uses a **layered
-pipeline**: (1) tokenization, (2) a noisy-channel spelling corrector based on
-edit distance, (3) a set of rules operating on part-of-speech tags and a
-dependency parse, and (4) an optional Transformer-based grammatical error
-correction (GEC) model. The layers are combined and deduplicated, and results
-are shown in an interactive web application. On a 36-item minimal-pair test set
-the full pipeline detects **97%** of introduced errors (**77%** with the
-offline rule layers alone) at a **0%** false-positive rate on clean sentences.
+This project is a program that reads English text and points out spelling and
+grammar mistakes. It works in **four steps, stacked on top of each other**:
+
+1. **Split** the text into sentences and words.
+2. **Spelling check** — find words that are not real English words and suggest
+   the closest correct word.
+3. **Grammar rules** — a set of small, hand-written checks (for example: "a
+   singular subject needs a singular verb").
+4. **AI model (optional)** — a neural network that rewrites the sentence
+   correctly; we compare its rewrite to the original to see what it changed.
+
+The results are shown in a simple web page that highlights each mistake.
+
+To measure how well it works, we built a test set of 36 short sentences: 30 with
+exactly one planted mistake each, and 6 that are already correct. Using steps
+1–3 only, the program finds **77%** of the planted mistakes. Adding the AI model
+in step 4 raises this to **97%**. In both cases it raises **zero** false alarms
+on the 6 correct sentences.
+
+---
 
 ## 1. Introduction
 
-### 1.1 Motivation
-Writing assistants (Grammarly, Microsoft Editor, LanguageTool) are among the
-most widely used NLP applications. They must solve two related but distinct
-problems: catching **misspellings** (a token that is not a valid word) and
-catching **grammatical errors** (all tokens valid, but the combination is
-wrong).
+### 1.1 Why this is useful
 
-### 1.2 Objectives
-1. Detect non-word spelling errors and propose corrections.
-2. Detect common grammatical errors (subject–verb agreement, article choice,
-   repeated words, capitalization, punctuation spacing).
-3. Detect context-sensitive errors that rules miss, using a neural model.
-4. Present results through a usable interface and evaluate them quantitatively.
+Tools like Grammarly, Microsoft Editor and LanguageTool are some of the most
+popular uses of language technology. They have to handle two different kinds of
+problem:
 
-### 1.3 Scope and limitations
-English only; sentence-level analysis; detection and single-best suggestion
-(not full auto-rewriting); no user personalization or style checking.
+- **Spelling mistakes** — the word itself is wrong: *"recieve"*, *"teh"*,
+  *"evry"*. These are easy to spot because the word does not exist.
+- **Grammar mistakes** — every word is a real word, but they do not fit
+  together: *"He go to school"*, *"a apple"*, *"I didn't knew"*. These are
+  harder because you have to look at how the words relate to each other.
 
-## 2. Background / Related Concepts
+This project builds a small system that handles both.
 
-### 2.1 Tokenization and sentence segmentation
-Splitting raw text into sentences and then tokens (words, punctuation,
-sub-word clitics such as *n't*). All later stages operate on these units and on
-their character offsets in the original string.
+### 1.2 What the system does
 
-### 2.2 The noisy-channel model for spelling correction
-A misspelling `x` is modelled as an intended word `w` passed through a noisy
-channel. The best correction is
-`ŵ = argmax_w P(w) · P(x | w)`,
-where `P(w)` is a word-frequency prior and `P(x | w)` decreases with the number
-of single-character edits (insertion, deletion, substitution, transposition —
-the **Damerau–Levenshtein distance**) between `x` and `w`. In practice we
-enumerate all dictionary words within edit distance ≤ 2 and rank them by
-frequency (Norvig's algorithm, as implemented by `pyspellchecker`).
+1. Find misspelled words and suggest corrections.
+2. Find common grammar mistakes: subject–verb agreement, *a* vs *an*, repeated
+   words, missing capital letters, spacing around punctuation, and wrong verb
+   form after *do/does/did*.
+3. Find harder, meaning-based mistakes (wrong preposition, wrong tense, *their*
+   vs *there*) using an AI model.
+4. Show everything in a usable interface, and measure the accuracy with numbers.
 
-### 2.3 Part-of-speech tagging
-A statistical sequence model assigns each token a grammatical category. We use
-spaCy's fine-grained Penn-Treebank tags, e.g. `VBZ` (3rd-person-singular present
-verb), `VBP` (other present verb), `NN` / `NNS` (singular / plural noun). These
-let a rule reason about **number** and **tense**.
+### 1.3 What is left out
 
-### 2.4 Dependency parsing
-A dependency parse is a tree in which every word points to its syntactic
-**head** with a labelled relation (`nsubj`, `dobj`, …). It answers "which noun
-is the subject of which verb?", which is exactly what a subject–verb agreement
-check needs.
+- English only.
+- It looks at one sentence at a time, not the whole document.
+- It **detects** mistakes and gives one best suggestion; it does not silently
+  rewrite your text.
+- No personalisation, no style or tone advice.
 
-### 2.5 Grammatical Error Correction (GEC) as sequence-to-sequence
-Modern GEC treats correction as translation from *ungrammatical* to
-*grammatical* English. A Transformer encoder–decoder (here **T5-base**,
-fine-tuned for grammar correction on the JFLEG corpus) is trained on
-(source, target) sentence pairs. It generalises to error types never explicitly
-programmed, at the cost of interpretability and speed.
+---
 
-### 2.6 Evaluation metrics
-- **Precision** = correct flags / all flags.
-- **Recall** = correct flags / all true errors.
-- **F1** = harmonic mean.
-Rule-based components favour precision; neural components favour recall.
+## 2. Background: the ideas we use
+
+This section explains the concepts behind each step, with an example for each.
+
+### 2.1 Splitting text into sentences and words (tokenization)
+
+Before anything else, raw text has to be broken into **sentences**, then into
+**tokens** (words and punctuation marks). This is not just "split on spaces":
+
+- *"don't"* becomes two tokens, *do* + *n't*.
+- *"U.S.A."* is one token, not three sentences.
+- The full stop in *"Dr. Khan"* does not end a sentence.
+
+We use the **spaCy** library for this. Every token also remembers its position
+(character number) in the original text, so we can highlight the exact spot
+later.
+
+### 2.2 Spelling correction by "closest real word" (the noisy-channel idea)
+
+Think of a typo as a correct word that got **damaged** on its way to the page.
+To fix *"evry"*, we ask: *which real word is this most likely to be a damaged
+version of?*
+
+Two things decide the answer:
+
+- **How common the candidate word is.** *"every"* and *"very"* are both common;
+  *"eery"* is rare.
+- **How much damage it takes to get there.** We count single-character edits —
+  insert a letter, delete a letter, swap a letter, or switch two neighbouring
+  letters. This count is called the **edit distance**. *"evry" → "every"* is
+  one insertion (distance 1).
+
+We list every dictionary word within **edit distance 2** of the typo, then sort
+those candidates by how common they are. This is Norvig's classic spelling
+algorithm, provided by the `pyspellchecker` library.
+
+Example: *"evry"* → suggestions *very, every, eery* (in that order, because
+*very* is the most frequent word among the close matches).
+
+### 2.3 Labelling each word's job (part-of-speech tagging)
+
+A **part-of-speech (POS) tag** says what grammatical role a word plays: noun,
+verb, adjective, and so on. spaCy uses fine-grained tags, for example:
+
+| Tag | Meaning | Example |
+|---|---|---|
+| `VBZ` | verb, 3rd-person singular, present | *goes*, *is*, *has* |
+| `VBP` | verb, present, not 3rd-person singular | *go*, *are*, *have* |
+| `NN` | singular noun | *dog* |
+| `NNS` | plural noun | *dogs* |
+
+Knowing the tag lets a rule reason about **number** (singular/plural) and
+**tense**.
+
+### 2.4 Finding who does what (dependency parsing)
+
+A **dependency parse** links each word to the word it depends on, with a label
+for the relationship. The key label for us is `nsubj` — "nominal subject".
+
+In *"The dog runs"*, the parse says *dog* is the `nsubj` of *runs*. That is
+exactly the information a subject–verb agreement check needs: it can now compare
+"is *dog* singular or plural?" with "is *runs* a singular or plural verb form?"
+
+### 2.5 Grammar correction as translation (the AI model)
+
+Modern AI grammar tools treat correction like **translation**: the input
+language is "English with mistakes" and the output language is "correct
+English". The model is a **Transformer** (the same family as translation and
+chat models) called **T5-base**, already fine-tuned on thousands of
+(wrong sentence, fixed sentence) pairs.
+
+We give it a sentence, it gives back a corrected sentence, and we **compare the
+two word by word**. Every word it changed, removed, or added is treated as a
+detected mistake.
+
+Strength: it catches mistakes nobody wrote a rule for. Weakness: it is slow, it
+needs an 850 MB download, and it cannot explain *why* — the only "reason" is the
+difference between the two sentences.
+
+### 2.6 How we measure accuracy
+
+- **Precision** = of all the things we flagged, how many were real mistakes.
+- **Recall** = of all the real mistakes, how many we flagged.
+- **F1** = a single score that balances the two.
+
+Hand-written rules are usually high precision (few false alarms) but low recall
+(they only know what we taught them). The AI model is the opposite.
+
+---
 
 ## 3. System Design
 
-### 3.1 Architecture
+### 3.1 The pipeline
 
 ```
 raw text
    │
-spaCy: tokenize + sentence-split + POS + dependency parse      (Layer 1)
+   ▼
+[Layer 1]  spaCy: split into sentences + words, add POS tags and dependency parse
    │
-   ├── spell_checker.check_spelling   dictionary + edit distance   (Layer 2)
-   ├── grammar_rules.check_grammar    8 rules over tags + parse     (Layer 3)
-   └── neural_gec.neural_issues       T5 rewrite → word-level diff  (Layer 4, optional)
-   │
-pipeline._dedupe   drop overlapping findings, keep the most specific
-   │
-sorted list of Issue(start, end, category, rule_id, message, suggestions, source)
-   │
-Streamlit UI: inline highlights + issue list
+   ├──────────────┬──────────────────────┐
+   ▼              ▼                      ▼
+[Layer 2]      [Layer 3]             [Layer 4]  (optional)
+spelling       grammar rules         AI model (T5):
+check          (8 rules over          rewrite sentence,
+(edit          POS tags + parse)      diff against original
+ distance)
+   │              │                      │
+   └──────────────┴──────────────────────┘
+                  ▼
+        merge + remove duplicates
+        (keep the most specific finding for each spot)
+                  ▼
+        one sorted list of "Issue" records
+                  ▼
+        Streamlit web page: highlight each mistake
 ```
 
-### 3.2 The `Issue` data structure
-Every layer emits the same record type (character span, category, stable
-`rule_id`, human message, ranked suggestions, source layer). This is what makes
-merging and evaluation uniform.
+Layers 2 and 3 run offline in a few milliseconds. Layer 4 is behind a checkbox
+because it is heavy.
+
+### 3.2 One shared record type: `Issue`
+
+Every layer, no matter how different, produces the **same** kind of record so
+the rest of the program only has to understand one thing:
+
+| Field | Meaning |
+|---|---|
+| `start`, `end` | character positions of the mistake in the original text |
+| `text` | the exact wrong substring |
+| `category` | `"spelling"` or `"grammar"` (used for colour) |
+| `rule_id` | which check found it, e.g. `NON_WORD`, `SUBJECT_VERB_AGREEMENT` |
+| `message` | plain-English explanation for the user |
+| `suggestions` | best-first list of replacements (can be empty) |
+| `source` | which layer: `spellchecker`, `rules`, or `neural` |
 
 ### 3.3 Layer 2 — spelling
-For each alphabetic token that is not a proper noun, an acronym, a URL/email, or
-a known dictionary word: enumerate candidates within edit distance 2, rank by
-corpus frequency, keep the top 5, preserve original casing.
 
-### 3.4 Layer 3 — grammar rules
-| `rule_id` | What it checks | Signals used |
+For each word token, we **skip** it if it is:
+
+- not purely alphabetic (numbers, punctuation, hyphenated words);
+- a contraction fragment (*n't*, *'s*, *'re*, …);
+- a single letter;
+- a URL or email address;
+- ALL CAPS (assumed to be an acronym like *NASA*, *HTTP*);
+- tagged as a proper noun (names and places are not in a general dictionary).
+
+Everything else is looked up in the dictionary. If it is missing, we build the
+list of candidates within edit distance 2, sort them by frequency, keep the top
+5, and re-apply the original capitalisation. The finding gets
+`rule_id = NON_WORD`.
+
+### 3.4 Layer 3 — the 8 grammar rules
+
+Each rule is a small function that reads POS tags and the dependency parse.
+Rules are deliberately **cautious**: they stay quiet unless they are fairly
+sure, so they almost never raise a false alarm.
+
+| `rule_id` | What it checks | Example it catches |
 |---|---|---|
-| `SENTENCE_CAPITALIZATION` | first token of a sentence is lower-case | `doc.sents` |
-| `LOWERCASE_I` | standalone pronoun "i" | token text |
-| `A_VS_AN` | "a"/"an" vs. following word's initial sound | next token + exception lists |
-| `SUBJECT_VERB_AGREEMENT` | singular/plural subject vs. `VBZ`/`VBP` verb | `nsubj` dependency, `tag_` |
-| `DO_SUPPORT_BASE_FORM` | verb after "do/does/did" must be the bare infinitive ("didn't *know*", not "didn't *knew*") | `aux` dependency with lemma "do", `tag_`, `lemma_` |
-| `REPEATED_WORD` | same word twice in a row | adjacent tokens |
-| `SPACE_BEFORE_PUNCT` | whitespace before `, . ! ? ; :` | regex on raw text |
-| `MISSING_SENTENCE_PUNCT` | clause with a finite verb, no terminal punctuation | `doc.sents`, `tag_` |
+| `SENTENCE_CAPITALIZATION` | sentence starts with a lowercase letter | *"he went home."* |
+| `LOWERCASE_I` | the word *i* used as the pronoun | *"then i left"* |
+| `A_VS_AN` | *a* / *an* chosen by the next word's sound | *"a apple"*, *"an dog"* |
+| `SUBJECT_VERB_AGREEMENT` | singular/plural subject vs. verb form | *"He go home"*, *"The children was"* |
+| `DO_SUPPORT_BASE_FORM` | after *do/does/did*, the verb must be the plain form | *"I didn't knew"* → *know* |
+| `REPEATED_WORD` | the same word twice in a row | *"the the plan"* |
+| `SPACE_BEFORE_PUNCT` | a space before `, . ! ? ; :` | *"Hello ."* |
+| `MISSING_SENTENCE_PUNCT` | a full sentence with no end mark | *"He went home"* (no full stop) |
 
-### 3.5 Layer 4 — neural GEC
-Each sentence is prefixed with `"grammar: "` and passed to
-`vennify/t5-base-grammar-correction` (a T5-base fine-tune, ~850 MB). We call the
-model directly through `AutoModelForSeq2SeqLM.generate` (4-beam search, greedy)
-rather than the `transformers` `pipeline`, whose `text2text-generation` task was
-removed in `transformers` 5. The rewrite is aligned to the input with a
-word-level `difflib` diff; every `replace` / `delete` / `insert` opcode becomes
-an `Issue` with `rule_id = NEURAL_GEC`, mapped back to character offsets. The
-model path is set by `NEURAL_GEC_MODEL` (a Hugging Face id or a local directory),
-so the layer can run fully offline.
+### 3.5 Layer 4 — the AI model
 
-### 3.6 Merging
-Findings are sorted by (source priority, position). A finding is dropped if it
-overlaps an already-kept finding from a higher-priority source
-(spelling > rules > neural), so a specific "misspelled word" beats a generic
-"the model changed this".
+Each sentence is sent to `vennify/t5-base-grammar-correction` (a T5-base model,
+about 850 MB) with the prefix `"grammar: "`. The model returns a corrected
+sentence. We line up the original and the correction **word by word** using
+Python's `difflib`, and turn every change into an `Issue` with
+`rule_id = NEURAL_GEC`:
 
-### 3.7 Interface
-Streamlit. Left sidebar explains the four layers and toggles Layer 4. Main pane:
-a text box, per-category counts, the text with `<mark>` highlights (red =
-spelling, blue = grammar) and hover tooltips, and a list of issues with
-suggestions.
+- word replaced or deleted → a normal highlight over those words;
+- word inserted → a zero-width marker between two words (shown as `⋯`).
+
+Two practical notes:
+
+- We call the model directly (`AutoModelForSeq2SeqLM.generate`, 4-beam search)
+  instead of the `transformers` "pipeline" helper, because the helper's
+  text-to-text task was removed in version 5 of the library.
+- The environment variable `NEURAL_GEC_MODEL` can point at a local folder, so
+  the model can run with no internet.
+
+### 3.6 Merging the three layers
+
+All findings are collected, then sorted so that the **more specific** layer wins
+when two findings cover the same spot. The priority is:
+
+> spelling (most specific) > rules > AI model (most generic)
+
+If a finding overlaps one that is already kept from a higher-priority layer, it
+is dropped. So a precise *"'evry' is misspelled"* beats a vague *"the model
+changed this word"*. Zero-width AI insertions are always kept, because they
+never really overlap anything.
+
+### 3.7 The interface
+
+A **Streamlit** web page:
+
+- **Left sidebar:** a short explanation of the four layers and a checkbox to
+  turn Layer 4 on (greyed out if the AI libraries are not installed).
+- **Main area:** a text box, three counters (total / spelling / grammar), the
+  text itself with coloured highlights (red = spelling, blue = grammar) and a
+  tooltip on each, and a list of every issue with its suggestions.
+
+---
 
 ## 4. Implementation
 
-- **Language / libraries:** Python 3.12, spaCy 3.8 (`en_core_web_sm`),
-  `pyspellchecker`, Streamlit; optionally `transformers` 5 + `torch` 2 (CPU).
-- **Lines of code:** ~600 across `src/` (≈780 with blank lines and comments).
-- **Design choices worth noting:**
-  - one shared `Issue` type;
-  - Layer 4 import-safe so the project runs on machines without PyTorch;
-  - spaCy loaded once via `lru_cache`;
-  - evaluation kept separate from the pipeline.
+- **Language and libraries:** Python 3.12, spaCy 3.8 (`en_core_web_sm` model),
+  `pyspellchecker`, Streamlit. Layer 4 additionally needs `transformers` 5 and
+  `torch` 2 (the CPU build is enough).
+- **Size:** about 600 lines of code across `src/` (around 780 counting blank
+  lines and comments).
+- **Design decisions worth noting:**
+  - one shared `Issue` type, so merging and scoring are simple;
+  - Layer 4 is written so that the program still imports and runs on a machine
+    with no AI libraries installed;
+  - spaCy is loaded once and reused (cached), because loading it is the slow
+    part;
+  - the scoring code is completely separate from the detection code.
+
+---
 
 ## 5. Evaluation
 
-### 5.1 Test set
-`data/eval_pairs.jsonl` — 36 minimal pairs: 30 `(bad, good)` sentences across 13
-error phenomena, plus 6 clean sentences to measure false positives.
+### 5.1 The test set
 
-### 5.2 Metrics
-- **Detection recall** — a `bad` sentence produced ≥ 1 issue.
-- **Localization rate** — an issue overlapped the span that differs from `good`.
-- **False-positive rate** — a clean sentence produced any issue.
+`data/eval_pairs.jsonl` contains **36 short sentences**:
+
+- **30 "error" sentences**, each with exactly one planted mistake, grouped into
+  **13 categories** (misspelling, *a*/*an*, subject–verb, wrong tense, wrong
+  preposition, *their/there*, and so on);
+- **6 "clean" sentences** that are already correct, used to check for false
+  alarms.
+
+Each error sentence is stored together with its corrected version, so the
+program knows exactly where the mistake is.
+
+### 5.2 What we measure
+
+- **Detection recall** — the error sentence produced at least one flag.
+- **Localization rate** — at least one flag actually lands on the words that
+  differ between the wrong and correct versions (not just somewhere in the
+  sentence).
+- **False-positive rate** — a clean sentence produced any flag at all (we want
+  this to be 0).
 
 ### 5.3 Results
 
-| Configuration | Detection recall | Localization | FP rate (clean) |
+| Configuration | Detection recall | Localization | False alarms (clean) |
 |---|---|---|---|
-| Layers 2–3 (offline rules) | **77%** (23/30) | 77% (23/30) | **0%** (0/6) |
-| Layers 2–4 (+ T5) | **97%** (29/30) | 97% (29/30) | **0%** (0/6) |
+| Layers 2–3 (offline rules only) | **77%** (23/30) | 77% (23/30) | **0%** (0/6) |
+| Layers 2–4 (with the AI model) | **97%** (29/30) | 97% (29/30) | **0%** (0/6) |
 
-Per-phenomenon, both configurations (detect / localize):
+Broken down by mistake type (detection / localization):
 
-| phenomenon | n | Layers 2–3 | Layers 2–4 (+ T5) |
+| Mistake type | Count | Rules only | With AI model |
 |---|--:|--:|--:|
-| a_vs_an | 3 | 100% / 100% | 100% / 100% |
-| do_support | 3 | 100% / 100% | 100% / 100% |
-| lowercase_i | 2 | 100% / 100% | 100% / 100% |
-| missing_sentence_punct | 1 | 100% / 100% | 100% / 100% |
-| non_word_spelling | 4 | 100% / 100% | 100% / 100% |
-| repeated_word | 2 | 100% / 100% | 100% / 100% |
-| sentence_capitalization | 2 | 100% / 100% | 100% / 100% |
-| space_before_punct | 2 | 100% / 100% | 100% / 100% |
-| subject_verb | 5 | 80% / 80% | 100% / 100% |
-| extra_word | 1 | 0% / 0% | 100% / 100% |
-| preposition | 2 | 0% / 0% | 50% / 50% |
-| real_word_confusion | 1 | 0% / 0% | 100% / 100% |
-| verb_tense | 2 | 0% / 0% | 100% / 100% |
+| a vs an | 3 | 100% / 100% | 100% / 100% |
+| do/did + wrong verb form | 3 | 100% / 100% | 100% / 100% |
+| lowercase "i" | 2 | 100% / 100% | 100% / 100% |
+| missing end punctuation | 1 | 100% / 100% | 100% / 100% |
+| misspelled word | 4 | 100% / 100% | 100% / 100% |
+| repeated word | 2 | 100% / 100% | 100% / 100% |
+| missing capital letter | 2 | 100% / 100% | 100% / 100% |
+| space before punctuation | 2 | 100% / 100% | 100% / 100% |
+| subject–verb agreement | 5 | 80% / 80% | 100% / 100% |
+| extra word | 1 | 0% / 0% | 100% / 100% |
+| wrong preposition | 2 | 0% / 0% | 50% / 50% |
+| wrong word (their/there) | 1 | 0% / 0% | 100% / 100% |
+| wrong verb tense | 2 | 0% / 0% | 100% / 100% |
 
-The rule layer handles every phenomenon it was designed for at 100%, plus 4/5
-subject–verb cases; the one miss ("The dog *chase* the ball…") is a spaCy parse
-error that tags the main verb "chase" as a noun, so the agreement rule never
-fires. The four phenomena at 0% for the rules — extra/missing words, preposition
-choice, real-word confusion, verb tense — are precisely the context-sensitive
-errors that rules cannot see.
+**Reading the rules-only column.** The rules score 100% on everything they were
+built for. The single subject–verb miss is *"The dog chase the ball…"*: spaCy
+mislabels *chase* as a noun, so the agreement rule never runs. The four
+categories at 0% — extra words, prepositions, *their/there*, and tense — are
+exactly the meaning-based mistakes that rules cannot see.
 
-Adding Layer 4 lifts overall detection **77% → 97%** and localization the same,
-recovering every rule blind spot except one of the two preposition cases
-("interested *on* learning" → "in" is caught; "good *in* mathematics" → "at" is
-not), and also fixing the parser-induced subject–verb miss. Critically, the generative
-model introduces **no** false positives on the six clean sentences — it does not
-rewrite text that is already correct. The cost is speed: the neural run takes
-~1m52s for 30 sentences on CPU (≈3.7 s/sentence) versus well under a second for
-the rule layers.
+**What the AI model adds.** Overall detection jumps from 77% to 97%. It fixes
+every rule blind spot except one of the two preposition cases (*"interested on
+learning"* → *in* is caught; *"good in mathematics"* → *at* is missed), and it
+also handles the *"dog chase"* sentence that broke the parser. Importantly, it
+raised **no** false alarms on the 6 clean sentences — it does not "correct"
+text that is already fine.
+
+**The cost.** The AI run took about **1 minute 52 seconds** for 30 sentences on
+a normal CPU (roughly 3.7 seconds per sentence). The rule layers finish all 30
+in well under a second.
 
 ### 5.4 Discussion
-- **What the rules catch reliably.** Non-word spelling, a/an, standalone "i",
-  repeated words, capitalization, punctuation spacing, do-support, and
-  subject–verb agreement when the subject is an unambiguous pronoun or noun —
-  all at 100% on this set. These are local, closed-class patterns that a POS tag
-  plus one dependency edge fully determine.
-- **What needs the neural layer.** Preposition choice, verb tense across a
-  clause, real-word confusions (*their/there*), and missing/extra words: the
-  rules score 0% on all four, T5 recovers three of them entirely and one
-  preposition case out of two. These errors need lexical/semantic context that
-  is not expressible as a tag pattern.
-- **Where false positives would come from.** None occurred here, but the likely
-  sources are proper nouns absent from the dictionary, imperatives read as
-  subject-less clauses, and informal-but-valid style. The 0% clean-set result
-  should be read as "no regressions on 6 easy sentences", not as a precision
-  guarantee.
-- **Rules vs. neural trade-off.** The rules are instant and every flag is
-  explainable by a named `rule_id`; T5 roughly quadruples recall but costs
-  ~3.7 s/sentence on CPU, needs an 850 MB model, and its "reason" is only the
-  diff between two strings.
 
-## 6. Limitations and Future Work
+**What the rules do well.** Misspellings, *a/an*, lowercase *i*, repeated words,
+capitalisation, punctuation spacing, *do*-support, and subject–verb agreement
+when the subject is a clear pronoun or noun — all 100% here. These are **local**
+patterns: one POS tag plus one link in the parse is enough to decide.
 
-- No real-word spelling errors without Layer 4 (*form* vs *from*).
-- Hyphenated and compound tokens are skipped by the spell checker.
-- Rules are English- and register-specific.
-- The T5 model sometimes paraphrases rather than minimally correcting, inflating
-  the diff.
-- **Future:** confidence scores per issue; a masked-LM (BERT) layer for
-  real-word errors; fine-tuning GECToR for token-level edits; a labelled
-  span-level dataset (e.g. W&I+LOCNESS) with the standard **ERRANT** scorer;
-  batching Layer 4 for speed.
+**What needs the AI model.** Prepositions, tense across a clause, *their/there*,
+and missing/extra words. The rules get 0% on all four; the model recovers three
+of them fully and one preposition case out of two. These mistakes depend on
+**meaning**, which a tag pattern cannot capture.
+
+**About the "0% false alarms".** This is reassuring but it is only 6 easy
+sentences. Real text would eventually produce false alarms — likely from unusual
+proper nouns, commands read as sentences missing a subject, or informal writing
+that is not actually wrong.
+
+**Rules vs. AI, in one line.** Rules are instant and every flag comes with a
+named reason; the AI model roughly quadruples what we catch but is slow, large,
+and cannot explain itself.
+
+---
+
+## 6. Limitations and future work
+
+**Current limitations**
+
+- Without the AI model, wrong-word mistakes like *form* vs *from* are invisible.
+- The spell checker skips hyphenated and compound words.
+- The rules are specific to English and to formal writing.
+- The AI model sometimes rephrases a sentence instead of making the smallest
+  fix, which makes the highlighted region bigger than it should be.
+
+**Possible extensions**
+
+- A confidence score on each flag.
+- A second AI layer (a masked language model such as BERT) aimed at wrong-word
+  mistakes.
+- Training on a properly labelled dataset (for example W&I+LOCNESS) and scoring
+  with the standard **ERRANT** tool instead of our own metric.
+- Running the AI model on many sentences at once for speed.
+
+---
 
 ## 7. Conclusion
 
-A four-layer pipeline combining a noisy-channel spell checker, syntactic rules,
-and an optional Transformer GEC model detects a broad range of English writing
-errors. The layered design makes the trade-off between precision (rules) and
-recall (neural) explicit and lets the system degrade gracefully when heavy
-dependencies are unavailable.
+The system stacks four layers: a "closest real word" spell checker, a set of
+cautious grammar rules, and an optional AI grammar model, all feeding one shared
+list of findings shown in a web page. Splitting the work this way makes the
+trade-off obvious — rules give precision, the AI model gives coverage — and lets
+the program still run usefully on a machine that cannot load the AI model.
+
+---
 
 ## References
 
-1. P. Norvig, "How to Write a Spelling Corrector", 2007.
+1. P. Norvig, *How to Write a Spelling Corrector*, 2007.
    https://norvig.com/spell-correct.html
-2. D. Jurafsky and J. H. Martin, *Speech and Language Processing*, 3rd ed. draft
-   — ch. on spelling correction (noisy channel) and ch. on POS tagging.
+2. D. Jurafsky and J. H. Martin, *Speech and Language Processing*, 3rd ed.
+   (draft) — chapters on spelling correction and POS tagging.
 3. spaCy documentation — https://spacy.io
-4. Bryant et al., "The BEA-2019 Shared Task on Grammatical Error Correction".
-5. Napoles et al., "JFLEG: A Fluency Corpus and Benchmark for GEC", 2017.
-6. Raffel et al., "Exploring the Limits of Transfer Learning with a Unified
-   Text-to-Text Transformer" (T5), 2020.
+4. C. Bryant et al., *The BEA-2019 Shared Task on Grammatical Error Correction*.
+5. C. Napoles et al., *JFLEG: A Fluency Corpus and Benchmark for GEC*, 2017.
+6. C. Raffel et al., *Exploring the Limits of Transfer Learning with a Unified
+   Text-to-Text Transformer* (T5), 2020.
 7. `pyspellchecker` — https://github.com/barrust/pyspellchecker
+
+---
+
+## Appendix A: Installation and usage
+
+### A.1 Setup
+
+```bash
+cd "NLP-Based Grammar and Spelling Error Detection"
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+
+# Optional: enable Layer 4 (the AI model). CPU-only torch keeps it small.
+pip install "transformers>=4.40" sentencepiece
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+To run Layer 4 offline, download the model once and point `NEURAL_GEC_MODEL` at
+the folder:
+
+```bash
+hf download vennify/t5-base-grammar-correction --local-dir models/t5-base-grammar-correction
+export NEURAL_GEC_MODEL=models/t5-base-grammar-correction
+```
+
+### A.2 Running
+
+```bash
+# Web app
+streamlit run app.py
+
+# One sentence on the command line
+python -m src.pipeline "he go to school evry day"
+
+# Accuracy on the test set
+python -m src.evaluate            # Layers 2–3
+python -m src.evaluate --neural   # add Layer 4
+```
+
+---
+
+## Appendix B: Repository structure
+
+The code is a small package with **one module per layer**, matching Section 3.
+
+```
+src/
+  issue.py           the Issue record — shared output of every layer
+  nlp_core.py        loads spaCy once (splitter + POS + parser)
+  spell_checker.py   Layer 2 — spelling
+  grammar_rules.py   Layer 3 — the 8 grammar rules (one function each)
+  pipeline.py        runs the layers and merges the findings
+  neural_gec.py      Layer 4 — the AI model (safe to import without it installed)
+  evaluate.py        Layer 5 — scoring on the test set
+data/
+  eval_pairs.jsonl   the 36 test sentences (wrong, correct, mistake type)
+app.py               the Streamlit web page
+report/report.md     this report
+```
